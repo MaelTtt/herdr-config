@@ -9,6 +9,19 @@ My herdr setup, styled after the Zeron app.
 - **Droid** in herdr-app's "Start an agent" menu, with the Factory logo.
 - **hc template** `droid` (`hc run --bg droid "<task>"`).
 
+- **Usage readout** at the bottom of the sidebar (`bin/usage.py`): Claude 5h and weekly limits,
+  and Droid's 5h, weekly and monthly limits. Cached, refreshed every 5 minutes.
+
+## Usage setup
+
+- **Claude**: nothing to do if you're signed in. It reads the OAuth token from
+  `~/.cli-proxy-api/claude-*.json` or `~/.claude/.credentials.json`, only to ask Anthropic for
+  your own usage. It never refreshes, prints or stores the token.
+- **Droid**: create an API key at <https://app.factory.ai/settings/api-keys> and put it in
+  `~/.config/herdr-app/secrets/factory-api-key` (mode 600) or in `$FACTORY_API_KEY`. Keep it out of this repo.
+- The Claude endpoint (`/api/oauth/usage`) is undocumented and rate limited, so the script
+  backs off on errors and shows the last good numbers as "stale".
+
 ## Install
 
 ```sh

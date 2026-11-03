@@ -3,7 +3,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, panes, agents, focused, exec, run, theme, shared, setAgentOrder, openOverlay, layout } from "herdr";
+import { spaces, panes, agents, focused, exec, run, theme, shared, setAgentOrder, openOverlay, layout, appHome } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -44,10 +44,29 @@ function icon(p, size, color) {
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
 }
 
+function resetIn(iso) {
+  const ms = Date.parse(iso) - Date.now();
+  if (!(ms > 0)) return "";
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+const BAR = 104;
+const usageColor = (t, pct) => (pct >= 90 ? "#f87171" : pct >= 70 ? t.blocked : t.accent);
+const USAGE_HINT = {
+  "no-key": "Add a Factory API key to show usage",
+  "token-expired": "Login expired, waiting for refresh",
+  "no-token": "Not signed in",
+  "no-plan": "No active plan",
+};
+
 export default class ZeronSessions extends View {
   init(_props, cx) {
     this.folded = new Set();
     this.host = "";
+    this.usage = null;
     cx.timer.every(30000, (cx) => cx.notify());
     cx.spawn(async (cx) => {
       try {
@@ -55,6 +74,63 @@ export default class ZeronSessions extends View {
       } catch {}
       cx.notify();
     });
+    // The script caches and rate-limits itself, so asking every minute only reads a file.
+    this.pull(cx);
+    cx.timer.every(60000, (cx) => this.pull(cx));
+  }
+
+  pull(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const r = await exec("python3", [`${appHome()}/bin/usage.py`]);
+        this.usage = JSON.parse(r.stdout);
+      } catch {}
+      cx.notify();
+    });
+  }
+
+  // One provider: its name with when the 5h window resets, then a bar per window.
+  usageCard(t, name, u) {
+    const windows = u?.ok ? [["5h", u.five_hour], ["7d", u.weekly], ["30d", u.monthly]].filter(([, w]) => w) : [];
+    const reset = u?.five_hour?.resets_at ? resetIn(u.five_hour.resets_at) : "";
+    return v_flex()
+      .gap(5)
+      .child(
+        h_flex()
+          .items_center()
+          .justify_between()
+          .text_size(11)
+          .child(div().text_color(t.muted).font_medium().child(name))
+          .child(div().text_color(t.dim).child(u?.ok ? (u.stale ? "stale" : reset ? `resets ${reset}` : "") : "")),
+      )
+      .when(!u?.ok, (el) => el.child(div().text_size(11).text_color(t.dim).child(u ? (USAGE_HINT[u.error] ?? "Unavailable") : "Loading…")))
+      .children(
+        windows.map(([label, w]) =>
+          h_flex()
+            .gap(8)
+            .items_center()
+            .text_size(11)
+            .child(div().w(22).flex_none().text_color(t.dim).child(label))
+            .child(
+              div().w(BAR).h(5).flex_none().rounded(3).bg(t.border).child(
+                div().w(Math.max(3, Math.round((BAR * Math.min(w.pct, 100)) / 100))).h(5).rounded(3).bg(usageColor(t, w.pct)),
+              ),
+            )
+            .child(div().flex_1().text_right().text_color(w.pct >= 70 ? usageColor(t, w.pct) : t.muted).child(`${Math.round(w.pct)}%`)),
+        ),
+      );
+  }
+
+  usageBlock(t) {
+    return v_flex()
+      .flex_none()
+      .gap(12)
+      .px(16)
+      .py(12)
+      .border_t(1)
+      .border_color(t.border)
+      .child(this.usageCard(t, "Claude", this.usage?.claude))
+      .child(this.usageCard(t, "Droid", this.usage?.factory));
   }
 
   render() {
@@ -253,6 +329,7 @@ export default class ZeronSessions extends View {
               .child(svg("mods/workspace-chrome/plus.svg").size(14)),
           ),
       )
-      .child(v_flex().id("zs-list").flex_1().min_h(0).px(8).pb(12).gap(2).overflow_y_scrollbar().mode("always").children(rows));
+      .child(v_flex().id("zs-list").flex_1().min_h(0).px(8).pb(12).gap(2).overflow_y_scrollbar().mode("always").children(rows))
+      .child(this.usageBlock(t));
   }
 }

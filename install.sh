@@ -15,9 +15,10 @@ put() { # put <from> <to>
 }
 
 for f in themes/zeron.json layouts/zeron.json layouts/zeron.svg icons/droid.svg \
-         mods/zeron-sessions/main.js mods/zeron-sessions/mod.json; do
+         mods/zeron-sessions/main.js mods/zeron-sessions/mod.json bin/usage.py; do
   put "$SRC/herdr-app/$f" "$APP/$f"
 done
+chmod +x "$APP/bin/usage.py"
 put "$SRC/herdr-core/templates/droid.md" "$CORE/templates/droid.md"
 
 # settings.json and programs.json are the user's own: merge instead of replacing.
