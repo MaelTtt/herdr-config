@@ -145,11 +145,23 @@ export default class ZeronSessions extends View {
       return v_flex().size_full().min_h(0).bg(t.chrome).p(4).gap(2).children(rows);
     }
 
-    const rows = sp.flatMap((w) => {
-      const open = !this.folded.has(w.id);
-      const tile = t[colors[w.id]] ?? t.accent;
+    // Spaces with the same name on the same machine are one project: each "new session"
+    // made a space of its own, and they would otherwise repeat the same header.
+    const groups = [];
+    for (const s of sp) {
+      const key = `${s.machine ?? ""}\u0000${s.name}`;
+      let g = groups.find((x) => x.key === key);
+      if (!g) groups.push((g = { key, spaces: [] }));
+      g.spaces.push(s);
+    }
+
+    const rows = groups.flatMap((g) => {
+      const w = g.spaces.find((s) => s.active) ?? g.spaces[0];
+      const open = !this.folded.has(g.key);
+      const hot = this.hovered === g.key;
+      const tile = t[colors[g.spaces[0].id]] ?? t.accent;
       const header = h_flex()
-        .id(`zh-${w.id}`)
+        .id(`zh-${g.spaces[0].id}`)
         .flex_none()
         .h(36)
         .mt(6)
@@ -159,8 +171,13 @@ export default class ZeronSessions extends View {
         .rounded(8)
         .cursor_pointer()
         .hover((s) => s.bg(t.hover))
+        .on_hover((on, cx) => {
+          if (on) this.hovered = g.key;
+          else if (this.hovered === g.key) this.hovered = null;
+          cx.notify();
+        })
         .on_click((_e, cx) => {
-          open ? this.folded.add(w.id) : this.folded.delete(w.id);
+          open ? this.folded.add(g.key) : this.folded.delete(g.key);
           cx.notify();
         })
         .on_mouse_down("right", () =>
@@ -180,8 +197,29 @@ export default class ZeronSessions extends View {
             .child([...w.name][0]?.toUpperCase() ?? "?"),
         )
         .child(div().flex_1().min_w(0).truncate().text_size(13).font_medium().text_color(t.foreground).child(w.name))
+        .when(hot, (el) =>
+          el.child(
+            div()
+              .id(`zn-${g.spaces[0].id}`)
+              .size(22)
+              .flex_none()
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded(6)
+              .text_color(t.dim)
+              .hover((s) => s.bg(t.selected).text_color(t.foreground))
+              .tooltip("New session in this project")
+              .on_click((_e, cx) => {
+                cx.stop_propagation();
+                run("space.select", { id: w.id });
+                openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 });
+              })
+              .child(svg("mods/workspace-chrome/plus.svg").size(13)),
+          ),
+        )
         .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(13).flex_none().text_color(t.dim));
-      return [header, ...(open ? w.tabs.map((tab) => session(w, tab)) : [])];
+      return [header, ...(open ? g.spaces.flatMap((s) => s.tabs.map((tab) => session(s, tab))) : [])];
     });
     setAgentOrder(order);
 
