@@ -53,7 +53,6 @@ function resetIn(iso) {
   return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-const BAR = 104;
 const usageColor = (t, pct) => (pct >= 90 ? "#f87171" : pct >= 70 ? t.blocked : t.accent);
 const USAGE_HINT = {
   "no-login": "Sign in to Droid to show usage",
@@ -91,50 +90,68 @@ export default class ZeronSessions extends View {
     });
   }
 
-  // One provider: its name with when the 5h window resets, then a bar per window.
-  usageCard(t, name, u) {
-    const windows = u?.ok ? [["5h", u.five_hour], ["7d", u.weekly], ["mo", u.monthly]].filter(([, w]) => w) : [];
-    // The reset that matters is the fullest window's: that is the one that will block you.
-    const tight = windows.filter(([, w]) => w.resets_at).sort(([, a], [, b]) => b.pct - a.pct)[0]?.[1];
-    const reset = tight ? resetIn(tight.resets_at) : "";
-    return v_flex()
-      .gap(5)
-      .child(
-        h_flex()
-          .items_center()
-          .justify_between()
-          .text_size(11)
-          .child(div().text_color(t.muted).font_medium().child(name))
-          .child(div().text_color(t.dim).child(u?.ok ? (u.stale ? "stale" : reset ? `resets ${reset}` : "") : "")),
-      )
-      .when(!u?.ok, (el) => el.child(div().text_size(11).text_color(t.dim).child(u ? (USAGE_HINT[u.error] ?? "Unavailable") : "Loading…")))
+  // One provider on one line: its icon, then up to two windows, each a thin bar and "42% 5h".
+  // Reset times are in the tooltip.
+  usageRow(t, key, name, iconPath, tint, u) {
+    const SIDE = 14, ICON = 14, GAP = 10, LABEL = 42, TRACK_GAP = 6;
+    const all = u?.ok ? [["5h", u.five_hour], ["wk", u.weekly], ["mo", u.monthly]].filter(([, w]) => w) : [];
+    // Room for two: keep the fullest, so a window that is at 0% makes way for one that matters.
+    const shown = [...all];
+    while (shown.length > 2) {
+      const lowest = shown.reduce((m, e) => (e[1].pct < m[1].pct ? e : m));
+      shown.splice(shown.indexOf(lowest), 1);
+    }
+    const sidebar = find(layout(), "sidebar")?.size?.px ?? 252;
+    const col = (sidebar - 2 * SIDE - ICON - GAP - GAP) / 2;
+    const bar = Math.max(16, Math.round(col - TRACK_GAP - LABEL));
+    const tip = u?.ok
+      ? `${name}: ${all.map(([l, w]) => `${l} ${Math.round(w.pct)}%${w.resets_at ? ` (resets in ${resetIn(w.resets_at) || "now"})` : ""}`).join(", ")}${u.stale ? " [stale]" : ""}`
+      : `${name}: ${u ? (USAGE_HINT[u.error] ?? "Unavailable") : "Loading…"}`;
+    return h_flex()
+      .id(`zu-${key}`)
+      .h(20)
+      .gap(GAP)
+      .items_center()
+      .tooltip(tip)
+      .child(tint ? svg(iconPath).size(ICON).flex_none().text_color(t.dim) : image(iconPath).w(ICON).h(ICON).flex_none())
+      .when(!u?.ok, (el) => el.child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(u ? (USAGE_HINT[u.error] ?? "Unavailable") : "Loading…")))
       .children(
-        windows.map(([label, w]) =>
-          h_flex()
-            .gap(8)
+        shown.map(([label, w]) => {
+          const hot = w.pct >= 70;
+          return h_flex()
+            .flex_1()
+            .min_w(0)
+            .gap(TRACK_GAP)
             .items_center()
-            .text_size(11)
-            .child(div().w(22).flex_none().text_color(t.dim).child(label))
             .child(
-              div().w(BAR).h(5).flex_none().rounded(3).bg(t.border).child(
-                div().w(Math.max(3, Math.round((BAR * Math.min(w.pct, 100)) / 100))).h(5).rounded(3).bg(usageColor(t, w.pct)),
+              div().w(bar).h(4).flex_none().rounded(2).bg(t.border).child(
+                div().w(Math.max(2, Math.round((bar * Math.min(w.pct, 100)) / 100))).h(4).rounded(2).bg(usageColor(t, w.pct)),
               ),
             )
-            .child(div().flex_1().text_right().text_color(w.pct >= 70 ? usageColor(t, w.pct) : t.muted).child(`${Math.round(w.pct)}%`)),
-        ),
+            .child(
+              h_flex()
+                .w(LABEL)
+                .flex_none()
+                .gap(3)
+                .items_center()
+                .text_size(11)
+                .child(div().font_medium().text_color(hot ? usageColor(t, w.pct) : t.foreground).child(`${Math.round(w.pct)}%`))
+                .child(div().text_color(t.dim).child(label)),
+            );
+        }),
       );
   }
 
   usageBlock(t) {
     return v_flex()
       .flex_none()
-      .gap(12)
-      .px(16)
-      .py(12)
+      .gap(8)
+      .px(14)
+      .py(10)
       .border_t(1)
       .border_color(t.border)
-      .child(this.usageCard(t, "Claude", this.usage?.claude))
-      .child(this.usageCard(t, "Droid", this.usage?.factory));
+      .child(this.usageRow(t, "claude", "Claude", "icons/claude.svg", false, this.usage?.claude))
+      .child(this.usageRow(t, "droid", "Droid", "icons/droid.svg", true, this.usage?.factory));
   }
 
   render() {
