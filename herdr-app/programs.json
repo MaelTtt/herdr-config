@@ -1,0 +1,10 @@
+{
+  "programs": {
+    "droid": {
+      "name": "Droid",
+      "icon": "icons/droid.svg",
+      "tint": true,
+      "run": ["droid"]
+    }
+  }
+}
