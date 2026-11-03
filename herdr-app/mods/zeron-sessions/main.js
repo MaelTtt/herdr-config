@@ -56,7 +56,9 @@ function resetIn(iso) {
 const BAR = 104;
 const usageColor = (t, pct) => (pct >= 90 ? "#f87171" : pct >= 70 ? t.blocked : t.accent);
 const USAGE_HINT = {
-  "no-key": "Add a Factory API key to show usage",
+  "no-login": "Sign in to Droid to show usage",
+  "login-expired": "Login expired: open Droid to refresh",
+  "no-crypto": "Install python3-cryptography for usage",
   "token-expired": "Login expired, waiting for refresh",
   "no-token": "Not signed in",
   "no-plan": "No active plan",
@@ -91,8 +93,10 @@ export default class ZeronSessions extends View {
 
   // One provider: its name with when the 5h window resets, then a bar per window.
   usageCard(t, name, u) {
-    const windows = u?.ok ? [["5h", u.five_hour], ["7d", u.weekly], ["30d", u.monthly]].filter(([, w]) => w) : [];
-    const reset = u?.five_hour?.resets_at ? resetIn(u.five_hour.resets_at) : "";
+    const windows = u?.ok ? [["5h", u.five_hour], ["7d", u.weekly], ["mo", u.monthly]].filter(([, w]) => w) : [];
+    // The reset that matters is the fullest window's: that is the one that will block you.
+    const tight = windows.filter(([, w]) => w.resets_at).sort(([, a], [, b]) => b.pct - a.pct)[0]?.[1];
+    const reset = tight ? resetIn(tight.resets_at) : "";
     return v_flex()
       .gap(5)
       .child(

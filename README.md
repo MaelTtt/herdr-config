@@ -17,8 +17,12 @@ My herdr setup, styled after the Zeron app.
 - **Claude**: nothing to do if you're signed in. It reads the OAuth token from
   `~/.cli-proxy-api/claude-*.json` or `~/.claude/.credentials.json`, only to ask Anthropic for
   your own usage. It never refreshes, prints or stores the token.
-- **Droid**: create an API key at <https://app.factory.ai/settings/api-keys> and put it in
-  `~/.config/herdr-app/secrets/factory-api-key` (mode 600) or in `$FACTORY_API_KEY`. Keep it out of this repo.
+- **Droid**: nothing to do if Droid is signed in. It reads Droid's own login (`~/.factory/auth.v2.keyring`,
+  key from the system keyring through `secret-tool`) and asks Factory for your limits. Needs
+  `python3-cryptography` and `libsecret-tools`. It only reads: if the login has expired, open Droid once
+  and it refreshes. Linux only for now (Droid's macOS keychain store isn't handled).
+  Fallback: an API key from <https://app.factory.ai/settings/api-keys> in
+  `~/.config/herdr-app/secrets/factory-api-key` (mode 600) or `$FACTORY_API_KEY`. Keep it out of this repo.
 - The Claude endpoint (`/api/oauth/usage`) is undocumented and rate limited, so the script
   backs off on errors and shows the last good numbers as "stale".
 

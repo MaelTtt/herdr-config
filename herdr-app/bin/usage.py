@@ -8,12 +8,16 @@ printed, written to the cache, or refreshed (refreshing would rotate the proxy's
 
 Claude token, first that works:
   $HERDR_USAGE_CLAUDE_TOKEN_FILE, ~/.cli-proxy-api/claude-*.json, ~/.claude/.credentials.json
-Factory API key (create one at https://app.factory.ai/settings/api-keys), first that exists:
+Factory: the account Droid is signed in as (~/.factory/auth.v2.keyring, key in the system keyring
+via secret-tool, or auth.v2.file with auth.v2.key). Needs python3-cryptography. Fallback, an API
+key from https://app.factory.ai/settings/api-keys:
   $FACTORY_API_KEY, ~/.config/herdr-app/secrets/factory-api-key
 """
+import base64
 import glob
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -100,6 +104,59 @@ def fetch_claude():
     return {"ok": True, "five_hour": window(data.get("five_hour"), "utilization"), "weekly": window(data.get("seven_day"), "utilization")}
 
 
+def jwt_exp(token):
+    try:
+        part = token.split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))).get("exp")
+    except (IndexError, ValueError, AttributeError):
+        return None
+
+
+def decrypt(blob, key):
+    """Droid's credential files are `iv:tag:ciphertext` (base64), AES-256-GCM."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    iv, tag, ct = (base64.b64decode(p) for p in blob.strip().split(":"))
+    return json.loads(AESGCM(key).decrypt(iv, ct + tag, None))
+
+
+def droid_login_token():
+    """The access token of the account Droid is signed in as, read-only: it is never refreshed
+    here (that would rotate Droid's refresh token). Droid renews it itself when it runs.
+    Returns (token, reason) with reason set when there is none."""
+    factory = os.path.join(HOME, ".factory")
+    keys = []  # (credential file, key)
+    try:  # the newer store: its key lives in the system keyring (libsecret)
+        out = subprocess.run(
+            ["secret-tool", "lookup", "service", "Factory CLI", "account", "auth-encryption-key"],
+            capture_output=True, timeout=5,
+        ).stdout.strip()
+        if out:
+            keys.append(("auth.v2.keyring", base64.b64decode(out)))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    try:  # the older store: a key file next to it
+        with open(os.path.join(factory, "auth.v2.key")) as f:
+            keys.append(("auth.v2.file", base64.b64decode(f.read().strip())))
+    except (OSError, ValueError):
+        pass
+    reason = "no-login"
+    for name, key in keys:
+        try:
+            with open(os.path.join(factory, name)) as f:
+                creds = decrypt(f.read(), key)
+        except ImportError:
+            return None, "no-crypto"
+        except Exception:  # wrong key for this file, or unreadable: try the next one
+            continue
+        token = creds.get("access_token")
+        exp = jwt_exp(token)
+        if token and exp and exp > time.time() + 30:
+            return token, None
+        reason = "login-expired"
+    return None, reason
+
+
 def factory_key():
     key = os.environ.get("FACTORY_API_KEY", "").strip()
     if key:
@@ -112,10 +169,11 @@ def factory_key():
 
 
 def fetch_factory():
-    key = factory_key()
-    if not key:
-        return {"ok": False, "error": "no-key"}
-    data = http_get("https://api.factory.ai/api/billing/limits", {"Authorization": f"Bearer {key}"})
+    token, reason = droid_login_token()
+    token = token or factory_key()
+    if not token:
+        return {"ok": False, "error": reason or "no-login"}
+    data = http_get("https://api.factory.ai/api/billing/limits", {"Authorization": f"Bearer {token}"})
     standard = (data.get("limits") or {}).get("standard") or {}
     if not standard:
         return {"ok": False, "error": "no-plan" if data.get("hasActiveSubscription") is False else "no-limits"}
